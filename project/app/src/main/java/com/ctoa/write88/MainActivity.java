@@ -2,6 +2,7 @@ package com.ctoa.write88;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
@@ -9,7 +10,6 @@ import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.WindowManager;
 import android.webkit.*;
-import android.app.AlertDialog;
 
 public class MainActivity extends Activity {
     private WebView webView;
@@ -19,7 +19,6 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-
         webView = new WebView(this);
         WebSettings s = webView.getSettings();
         s.setJavaScriptEnabled(true);
@@ -33,7 +32,6 @@ public class MainActivity extends Activity {
         s.setBuiltInZoomControls(false);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
@@ -47,7 +45,6 @@ public class MainActivity extends Activity {
                 return false;
             }
         });
-
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onJsAlert(WebView v, String u, String m, final JsResult r) {
@@ -65,7 +62,6 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
-
         webView.loadUrl("file:///android_asset/WRITE88.html");
         setContentView(webView);
     }
