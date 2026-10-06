@@ -1,4 +1,4 @@
-package com.ctoa.write88;
+package com.ctoa.htmlviewer88;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
@@ -62,7 +62,7 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
-        webView.loadUrl("file:///android_asset/WRITE88.html");
+        webView.loadUrl("file:///android_asset/html_viewer_88.html");
         setContentView(webView);
     }
 
