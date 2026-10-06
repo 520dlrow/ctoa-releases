@@ -27,6 +27,14 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Accept licenses
+        run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
+
+      - name: Install required SDK packages
+        run: |
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+        continue-on-error: false
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
@@ -34,30 +42,20 @@ jobs:
 
       - name: Build debug APK
         working-directory: project
-        run: gradle assembleDebug --no-daemon
+        run: gradle assembleDebug --no-daemon --stacktrace
 
       - name: Get short SHA
         id: vars
         run: echo "sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
-      - name: Read app metadata
-        id: meta
-        working-directory: project
-        run: |
-          if [ -f .app-info ]; then
-            echo "name=$(cat .app-info)" >> $GITHUB_OUTPUT
-          else
-            echo "name=app" >> $GITHUB_OUTPUT
-          fi
-
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ steps.vars.outputs.sha }}
-          name: "${{ steps.meta.outputs.name }} · ${{ steps.vars.outputs.sha }}"
+          name: "Build ${{ steps.vars.outputs.sha }}"
           files: project/app/build/outputs/apk/debug/*.apk
-          generate_release_notes: false
           make_latest: true
+          generate_release_notes: false
 
       - name: Cleanup old releases
         if: always()
@@ -65,7 +63,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # keep only the 10 most recent releases
           gh release list --repo ${{ github.repository }} --limit 100 --json tagName --jq '.[10:] | .[].tagName' | while read -r tag; do
             if [ -n "$tag" ]; then
               gh release delete "$tag" --repo ${{ github.repository }} --yes --cleanup-tag || true
