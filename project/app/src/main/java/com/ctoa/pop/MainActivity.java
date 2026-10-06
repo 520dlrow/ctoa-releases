@@ -1,4 +1,4 @@
-package com.ctoa.mc88;
+package com.ctoa.pop;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
