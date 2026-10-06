@@ -453,6 +453,14 @@ h1,h2,h3{font-family:'Fraunces',Georgia,serif;font-weight:500;letter-spacing:-.0
       </ol>
     </div>
     <div class="guide-section">
+      <h3>Updates</h3>
+      <ol class="guide-steps">
+        <li>The workflow now uses a <b>persistent keystore</b>.</li>
+        <li>Every new build is signed with the same key.</li>
+        <li>You can install updates <b>without uninstalling</b>.</li>
+      </ol>
+    </div>
+    <div class="guide-section">
       <h3>Support</h3>
       <ol class="guide-steps">
         <li>Any problem? Tap the bell icon in the header.</li>
@@ -469,14 +477,6 @@ h1,h2,h3{font-family:'Fraunces',Georgia,serif;font-weight:500;letter-spacing:-.0
 (function(){
 'use strict';
 
-/* ═══════════════════════════════════════════════════════════════
-   NATIVE BRIDGE DETECTION
-   The Android app injects window.AndroidBridge with methods:
-     - saveAPK(base64, filename)
-     - notify(title, body)
-     - openExternal(url)
-     - getVersion()
-   ═══════════════════════════════════════════════════════════════ */
 const NATIVE = (typeof window.AndroidBridge !== 'undefined' && window.AndroidBridge !== null);
 const IS_ANDROID = NATIVE && typeof window.AndroidBridge.getVersion === 'function';
 
@@ -484,7 +484,6 @@ if (IS_ANDROID) {
   document.getElementById('brandTag').textContent = 'apk · v' + window.AndroidBridge.getVersion();
 }
 
-/* ═══════════ STATE ═══════════ */
 const state = {
   conn: { user:'', token:'', repo:'ctoa-builds', private:true },
   userFiles: {},
@@ -511,19 +510,16 @@ function showToast(msg, cls){
   toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
 }
 
-/* ═══════════ NATIVE NOTIFICATIONS ═══════════ */
 function nativeNotify(title, body){
   if (IS_ANDROID && window.AndroidBridge.notify) {
     try { window.AndroidBridge.notify(title, body); return; } catch(e){}
   }
-  // Web fallback
   if ('Notification' in window && Notification.permission === 'granted') {
     try { new Notification(title, { body }); return; } catch(e){}
   }
   showToast(title + ' · ' + body);
 }
 
-/* Contact notification — the one you asked for */
 function showContactNotification(){
   if (IS_ANDROID && window.AndroidBridge.notify) {
     try {
@@ -534,7 +530,6 @@ function showContactNotification(){
       return;
     } catch(e){}
   }
-  // Fallback to system notification if permission granted
   if ('Notification' in window && Notification.permission === 'granted') {
     try {
       new Notification('MC-MC88 · CtoA Support', {
@@ -544,11 +539,9 @@ function showContactNotification(){
       return;
     } catch(e){}
   }
-  // Last resort — toast
   showToast('Contact: mohamed005cheikh@gmail.com', 'ok');
 }
 
-/* Trigger contact notification on first launch (once per install) */
 try {
   const seen = localStorage.getItem('ctoa.welcomed');
   if (!seen) {
@@ -559,7 +552,6 @@ try {
   }
 } catch(e){}
 
-/* ═══════════ SAVE APK (native or browser) ═══════════ */
 async function saveAPK(blob, filename){
   if (IS_ANDROID && window.AndroidBridge.saveAPK) {
     try {
@@ -577,7 +569,6 @@ async function saveAPK(blob, filename){
       showToast('native save failed · fallback', 'err');
     }
   }
-  // Browser fallback
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = filename;
@@ -587,7 +578,6 @@ async function saveAPK(blob, filename){
   return true;
 }
 
-/* ═══════════ SANITIZER ═══════════ */
 const JUNK = [/^__MACOSX\//i,/\/__MACOSX\//i,/^\.DS_Store$/,/\/\.DS_Store$/,/^Thumbs\.db$/i,/\/Thumbs\.db$/i,/^desktop\.ini$/i,/^\.git(\/|$)/,/\/\.git\//,/^node_modules(\/|$)/,/\/node_modules\//,/^\.vscode(\/|$)/,/^\.idea(\/|$)/];
 function isTextFile(p){ return /\.(html?|css|js|mjs|json|txt|xml|md|markdown|svg|webmanifest)$/i.test(p); }
 
@@ -650,7 +640,6 @@ function renderSanitizerReport(r){
 }
 $('#sanitizerHead').addEventListener('click', () => $('#sanitizerReport').classList.toggle('open'));
 
-/* ═══════════ GITHUB API ═══════════ */
 async function gh(path, opts={}, retries=4){
   let lastErr;
   for (let i = 0; i < retries; i++){
@@ -710,7 +699,7 @@ async function ensureWorkflowUpToDate(){
     const d = await r.json(); sha = d.sha;
     if (atob(d.content.replace(/\n/g,'')) === WORKFLOW_YAML) return false;
   } catch(err){ if (err.status !== 404) throw err; }
-  const body = { message: 'CtoA: sync workflow', content: btoa(unescape(encodeURIComponent(WORKFLOW_YAML))), branch: 'main' };
+  const body = { message: 'CtoA: sync workflow (persistent keystore)', content: btoa(unescape(encodeURIComponent(WORKFLOW_YAML))), branch: 'main' };
   if (sha) body.sha = sha;
   await gh('/repos/' + user + '/' + repo + '/contents/' + path, { method:'PUT', body: JSON.stringify(body) });
   return true;
@@ -768,7 +757,10 @@ function bytesToBase64(bytes){
   return btoa(bin);
 }
 
-/* ═══════════ WORKFLOW YAML ═══════════ */
+/* ═══════════════════════════════════════════════════════════════
+   WORKFLOW YAML — WITH PERSISTENT KEYSTORE
+   Solves "App not installed" when updating
+   ═══════════════════════════════════════════════════════════════ */
 const WORKFLOW_YAML = `name: Build APK
 
 on:
@@ -786,30 +778,64 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: \${{ secrets.GITHUB_TOKEN }}
+
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17' }
-      - name: Configure SDK
+
+      - name: Configure Android SDK
         run: |
           SDK="/usr/local/lib/android/sdk"
           echo "ANDROID_HOME=$SDK" >> $GITHUB_ENV
           echo "$SDK/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "$SDK/platform-tools" >> $GITHUB_PATH
-      - name: Install packages
+
+      - name: Install SDK packages
         run: |
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
           sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" || true
-      - name: local.properties
+
+      - name: Persistent debug keystore
+        run: |
+          KEYSTORE="$GITHUB_WORKSPACE/.ctoa-debug.keystore"
+          if [ ! -f "$KEYSTORE" ]; then
+            echo "creating new keystore (first run)"
+            keytool -genkeypair -v \\
+              -keystore "$KEYSTORE" \\
+              -storepass android \\
+              -keypass android \\
+              -alias androiddebugkey \\
+              -keyalg RSA -keysize 2048 -validity 10000 \\
+              -dname "CN=CtoA Debug,O=CtoA,C=US"
+            git config --global user.email "ctoa-bot@users.noreply.github.com"
+            git config --global user.name "CtoA Bot"
+            git add -f "$KEYSTORE"
+            git commit -m "CtoA: persist debug keystore [skip ci]" || true
+            git push || true
+          else
+            echo "reusing existing keystore"
+          fi
+          mkdir -p ~/.android
+          cp "$KEYSTORE" ~/.android/debug.keystore
+          echo "keystore ready for signing"
+
+      - name: Create local.properties
         working-directory: project
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
       - uses: gradle/actions/setup-gradle@v3
         with: { gradle-version: 8.2 }
+
       - name: Build
         working-directory: project
         run: gradle assembleDebug --no-daemon --stacktrace
+
       - name: SHA
         if: success()
         id: vars
         run: echo "sha=\${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
       - uses: softprops/action-gh-release@v2
         if: success()
         with:
@@ -817,6 +843,7 @@ jobs:
           name: "Build \${{ steps.vars.outputs.sha }}"
           files: project/app/build/outputs/apk/debug/*.apk
           make_latest: true
+
       - name: Cleanup
         if: always()
         continue-on-error: true
@@ -827,7 +854,6 @@ jobs:
           done
 `;
 
-/* ═══════════ GENERATORS ═══════════ */
 function sanitizePkg(p){
   let out = String(p).toLowerCase().replace(/[^a-z0-9.]/g,'').replace(/^\.+|\.+$/g,'').replace(/\.+/g,'.');
   if (!/^[a-z]/.test(out)) out = 'a' + out;
@@ -990,10 +1016,8 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
-        // Native bridge
         webView.addJavascriptInterface(new AndroidBridge(), "AndroidBridge");
 
-        // File chooser support
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams params){
@@ -1022,7 +1046,6 @@ public class MainActivity extends Activity {
             }
         });
 
-        // Intercept external links
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
@@ -1037,11 +1060,9 @@ public class MainActivity extends Activity {
             }
         });
 
-        // Fallback download listener (for any http/blob download links)
         webView.setDownloadListener((url, ua, cd, mt, size) -> {
             try {
                 if (url.startsWith("blob:")) {
-                    // Blob URLs are handled by the JS bridge — ignore here
                     Toast.makeText(this, "Use Save APK button", Toast.LENGTH_SHORT).show();
                     return;
                 }
@@ -1093,7 +1114,6 @@ public class MainActivity extends Activity {
     @Override protected void onPause(){ super.onPause(); if (webView != null) webView.onPause(); }
     @Override protected void onResume(){ super.onResume(); if (webView != null) webView.onResume(); }
 
-    /* ════════ Notification Channel ════════ */
     private void createNotificationChannel(){
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O){
             NotificationChannel ch = new NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT);
@@ -1111,7 +1131,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    /* ════════ JavaScript Bridge ════════ */
     public class AndroidBridge {
 
         @JavascriptInterface
@@ -1156,7 +1175,6 @@ public class MainActivity extends Activity {
                     Uri fileUri = null;
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q){
-                        // MediaStore — works on Android 10+ without storage permission
                         ContentValues values = new ContentValues();
                         values.put(MediaStore.Downloads.DISPLAY_NAME, cleanName);
                         values.put(MediaStore.Downloads.MIME_TYPE, "application/vnd.android.package-archive");
@@ -1172,7 +1190,6 @@ public class MainActivity extends Activity {
                             fileUri = uri;
                         }
                     } else {
-                        // Legacy path — Android 9 and below
                         File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
                         if (!dir.exists()) dir.mkdirs();
                         File file = new File(dir, cleanName);
@@ -1182,10 +1199,8 @@ public class MainActivity extends Activity {
                         fileUri = Uri.fromFile(file);
                     }
 
-                    // Show notification
                     notify("APK saved to Downloads", cleanName + " · tap to install");
 
-                    // Try to launch installer
                     if (fileUri != null){
                         try {
                             Intent install = new Intent(Intent.ACTION_VIEW);
@@ -1264,7 +1279,6 @@ async function generateProject(sanitized){
   return { cfg, files };
 }
 
-/* ═══════════ BUILD PIPELINE ═══════════ */
 function logLine(text, cls){
   const log = $('#buildLog');
   if (!log) return;
@@ -1426,7 +1440,6 @@ async function buildAPK(){
     $('#apkMeta').textContent = apkName + ' · ' + (blob.size/1024/1024).toFixed(2) + ' MB · ' + total + 's';
     success.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-    // Auto-save on native, or notify
     nativeNotify('CtoA · Build complete', apkName + ' is ready · tap Save APK');
     showToast('APK built · tap Save APK', 'ok');
 
@@ -1442,7 +1455,6 @@ async function buildAPK(){
   }
 }
 
-/* ═══════════ CONNECT ═══════════ */
 $('#connectBtn').addEventListener('click', async () => {
   const user = $('#ghUser').value.trim();
   const token = $('#ghToken').value.trim();
@@ -1474,7 +1486,6 @@ $('#connBtn').addEventListener('click', () => {
   else goStep(1);
 });
 
-/* ═══════════ CODE HANDLING ═══════════ */
 $('#pickFileBtn').addEventListener('click', () => $('#codeInput').click());
 $('#pickFolderBtn').addEventListener('click', () => $('#codeFolderInput').click());
 $('#codeDrop').addEventListener('click', () => $('#codeInput').click());
@@ -1664,7 +1675,6 @@ bindColor('#iconBg', '#iconBgHex');
 bindColor('#iconFg', '#iconFgHex');
 $('#appName').addEventListener('input', regenerateIcon);
 
-/* ═══════════ STEP NAV ═══════════ */
 function goStep(n){
   $$('.panel[data-panel]').forEach(p => p.classList.toggle('active', +p.dataset.panel === n));
   $$('.step-pill').forEach(p => {
@@ -1710,7 +1720,6 @@ $('#newBuildBtn').addEventListener('click', () => {
   goStep(2);
 });
 
-/* ═══════════ GUIDE + CONTACT ═══════════ */
 const gp = $('#guidePanel'), gb = $('#guideBack');
 $('#helpBtn').addEventListener('click', () => { gp.classList.add('open'); gb.classList.add('open'); });
 $('#guideClose').addEventListener('click', () => { gp.classList.remove('open'); gb.classList.remove('open'); });
@@ -1720,7 +1729,6 @@ $('#notifyBtn').addEventListener('click', () => showContactNotification());
 
 $('#brandLink').addEventListener('click', e => { e.preventDefault(); goStep(state.conn.token ? 2 : 1); });
 
-/* ═══════════ INIT ═══════════ */
 try {
   const saved = JSON.parse(localStorage.getItem('ctoa.conn') || '{}');
   if (saved.user){ $('#ghUser').value = saved.user; state.conn.user = saved.user; }
