@@ -1,4 +1,4 @@
-package com.ctoa.feed88;
+package com.ctoa.ctoa88;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
@@ -62,7 +62,7 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
-        webView.loadUrl("file:///android_asset/feed88.html");
+        webView.loadUrl("file:///android_asset/CtoA88.html");
         setContentView(webView);
     }
 
