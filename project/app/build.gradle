@@ -1,9 +1,9 @@
 plugins { id 'com.android.application' }
 android {
-    namespace 'com.ctoa.pop'
+    namespace 'com.ctoa.json88'
     compileSdk 34
     defaultConfig {
-        applicationId "com.ctoa.pop"
+        applicationId "com.ctoa.json88"
         minSdk 24
         targetSdk 34
         versionCode 1
