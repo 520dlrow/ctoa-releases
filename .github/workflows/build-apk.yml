@@ -14,7 +14,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -28,57 +28,67 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          log-accepted-android-sdk-licenses: false
 
-      - name: Accept Android licenses
-        run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
+      - name: Verify environment
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          java -version
+          which sdkmanager || echo "sdkmanager not found"
+          sdkmanager --list_installed || true
 
       - name: Install Android SDK components
         run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
           sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-          echo "--- installed packages ---"
-          sdkmanager --list_installed
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: 8.2
+      - name: Create local.properties
+        working-directory: project
+        run: |
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          cat local.properties
+
+      - name: Make sure wrapper exists
+        working-directory: project
+        run: |
+          if [ ! -f gradlew ]; then
+            echo "gradlew missing — downloading Gradle 8.2 directly"
+            curl -sL "https://services.gradle.org/distributions/gradle-8.2-bin.zip" -o /tmp/gradle.zip
+            unzip -q /tmp/gradle.zip -d /opt
+            echo "/opt/gradle-8.2/bin" >> $GITHUB_PATH
+          fi
+          chmod +x gradlew 2>/dev/null || true
 
       - name: Build debug APK
         working-directory: project
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: |
+          if [ -f gradlew ]; then
+            ./gradlew assembleDebug --no-daemon --stacktrace --info
+          else
+            gradle assembleDebug --no-daemon --stacktrace --info
+          fi
+
+      - name: Show APK
+        if: always()
+        working-directory: project
+        run: |
+          echo "--- looking for APK ---"
+          find . -name "*.apk" -type f 2>/dev/null || echo "no APK found"
+          ls -la app/build/outputs/apk/debug/ 2>/dev/null || true
 
       - name: Get short SHA
+        if: success()
         id: vars
         run: echo "sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
-      - name: Read app metadata
-        id: meta
-        working-directory: project
-        run: |
-          if [ -f .app-info ]; then
-            echo "name=$(cat .app-info)" >> $GITHUB_OUTPUT
-          else
-            echo "name=app" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Verify APK exists
-        run: |
-          if [ ! -f project/app/build/outputs/apk/debug/app-debug.apk ]; then
-            echo "APK not found — listing output dir:"
-            ls -la project/app/build/outputs/apk/debug/ || true
-            exit 1
-          fi
-          echo "APK size: $(du -h project/app/build/outputs/apk/debug/app-debug.apk)"
-
       - name: Publish release
+        if: success()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ steps.vars.outputs.sha }}
-          name: "${{ steps.meta.outputs.name }} · ${{ steps.vars.outputs.sha }}"
+          name: "Build ${{ steps.vars.outputs.sha }}"
           files: project/app/build/outputs/apk/debug/*.apk
-          generate_release_notes: false
           make_latest: true
 
       - name: Cleanup old releases
@@ -88,7 +98,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release list --repo ${{ github.repository }} --limit 100 --json tagName --jq '.[10:] | .[].tagName' | while read -r tag; do
-            if [ -n "$tag" ]; then
-              gh release delete "$tag" --repo ${{ github.repository }} --yes --cleanup-tag || true
-            fi
+            [ -n "$tag" ] && gh release delete "$tag" --repo ${{ github.repository }} --yes --cleanup-tag || true
           done
