@@ -1,9 +1,9 @@
 plugins { id 'com.android.application' }
 android {
-    namespace 'com.ctoa.sampleapp'
+    namespace 'com.ctoa.index'
     compileSdk 34
     defaultConfig {
-        applicationId "com.ctoa.sampleapp"
+        applicationId "com.ctoa.index"
         minSdk 24
         targetSdk 34
         versionCode 1
